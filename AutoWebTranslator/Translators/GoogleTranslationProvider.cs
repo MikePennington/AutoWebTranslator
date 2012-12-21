@@ -88,9 +88,9 @@ namespace AutoWebTranslator.Translators
                     }
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                // Do nothing. Exception is handled by translation.TargetLanguage being empty
+                throw ex;
             }
         }
 

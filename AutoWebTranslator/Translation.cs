@@ -1,4 +1,6 @@
-﻿namespace AutoWebTranslator
+﻿using System;
+
+namespace AutoWebTranslator
 {
     public class Translation
     {

@@ -10,7 +10,7 @@ namespace AutoWebTranslator
 {
     public class TranslationFilter : MemoryStream
     {
-        private static readonly List<string> ExcludeTags = new List<string> { "script", "style", "link" };
+        private static readonly List<string> ExcludeTags = new List<string> { "script", "style" };
         
         private readonly Stream _outputStream;
         private readonly ITranslationProvider _translationProvider;
@@ -77,49 +77,106 @@ namespace AutoWebTranslator
 
         private string TranslateAll(string html)
         {
+            html = TranslateNodes(html, "//text()");
+            html = TranslateNodes(html, "//input[@type='submit']");
+            return html;
+        }
+
+        private string TranslateNodes(string html, string xpath)
+        {
             if (_sourceLanguage == _targetLanguage)
                 return html;
 
             var doc = new HtmlDocument();
             doc.LoadHtml(html);
-            HtmlNodeCollection textNodes = doc.DocumentNode.SelectNodes("//text()");
+            HtmlNodeCollection nodes = doc.DocumentNode.SelectNodes(xpath);
+            if (nodes == null)
+                return html;
 
-            var trans = new TranslationRequest(_sourceLanguage, _targetLanguage);
+            var translationRequest = new TranslationRequest(_sourceLanguage, _targetLanguage);
 
-            foreach (var textNode in textNodes)
+            foreach (var node in nodes)
             {
-                if (!TranslateNode(textNode))
+                if (!ShouldTranslateNode(node))
                     continue;
 
-                trans.Translations.Add(new Translation(textNode.InnerHtml));
+                translationRequest.Translations.Add(new Translation(FindTextToTranslate(node)));
             }
 
             // De-dupe list to minimize calls
-            trans.Translations = trans.Translations.Distinct().ToList();
+            translationRequest.Translations = translationRequest.Translations.Distinct().ToList();
 
-            _translationProvider.Translate(trans);
+            _translationProvider.Translate(translationRequest);
 
-            foreach (var textNode in textNodes)
+            foreach (var node in nodes)
             {
-                if (!TranslateNode(textNode))
+                if (!ShouldTranslateNode(node))
                     continue;
 
-                Translation t = trans.Translations.FirstOrDefault(x => x.SourceText == textNode.InnerHtml);
-                if(t != null)
-                    textNode.InnerHtml = t.TargetText;
+                Translation t = translationRequest.Translations.FirstOrDefault(x => x.SourceText == FindTextToTranslate(node));
+                if (t != null)
+                    WriteTranslatedText(node, t.TargetText);
             }
 
             return doc.DocumentNode.InnerHtml;
         }
 
-        private bool TranslateNode(HtmlNode textNode)
+        private bool ShouldTranslateNode(HtmlNode node)
         {
-            string text = textNode.InnerHtml;
-            if (string.IsNullOrWhiteSpace(text))
+            if (node.NodeType == HtmlNodeType.Text)
+            {
+                string text = node.InnerHtml;
+                if (string.IsNullOrWhiteSpace(text))
+                    return false;
+                if (ExcludeTags.Contains(node.ParentNode.Name.ToLower()))
+                    return false;
+                return true;
+            }
+            else if (node.NodeType == HtmlNodeType.Element)
+            {
+                if(node.Name.ToLower() == "input")
+                {
+                    var value = node.GetAttributeValue("value", null);
+                    return !string.IsNullOrWhiteSpace(value);
+                }
                 return false;
-            if (ExcludeTags.Contains(textNode.ParentNode.Name.ToLower()))
-                return false;
-            return true;
+            }
+            return false;
+        }
+
+        public string FindTextToTranslate(HtmlNode node)
+        {
+            if (node.NodeType == HtmlNodeType.Text)
+            {
+                string text = node.InnerHtml;
+                if (string.IsNullOrWhiteSpace(text))
+                    return null;
+                if (ExcludeTags.Contains(node.ParentNode.Name.ToLower()))
+                    return null;
+                return text;
+            }
+            else if (node.NodeType == HtmlNodeType.Element)
+            {
+                if (node.Name.ToLower() == "input")
+                {
+                    var value = node.GetAttributeValue("value", null);
+                    return string.IsNullOrWhiteSpace(value) ? null : value;
+                }
+                return null;
+            }
+            return null;
+        }
+
+        private void WriteTranslatedText(HtmlNode node, string text)
+        {
+            if (node.NodeType == HtmlNodeType.Text)
+            {
+                node.InnerHtml = text;
+            }
+            else if (node.NodeType == HtmlNodeType.Element && node.Name.ToLower() == "input")
+            {
+                node.SetAttributeValue("value", text);
+            }
         }
     }
 }
